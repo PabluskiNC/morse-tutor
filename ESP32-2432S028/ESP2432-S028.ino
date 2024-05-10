@@ -26,6 +26,41 @@
 #include "esp_now.h"
 #include "WiFi.h"
 
+#include <SPI.h>
+
+/*  Install the "TFT_eSPI" library by Bodmer to interface with the TFT Display - https://github.com/Bodmer/TFT_eSPI
+    *** IMPORTANT: User_Setup.h available on the internet will probably NOT work with the examples available at Random Nerd Tutorials ***
+    *** YOU MUST USE THE User_Setup.h FILE PROVIDED IN THE LINK BELOW IN ORDER TO USE THE EXAMPLES FROM RANDOM NERD TUTORIALS ***
+    FULL INSTRUCTIONS AVAILABLE ON HOW CONFIGURE THE LIBRARY: https://RandomNerdTutorials.com/cyd/ or https://RandomNerdTutorials.com/esp32-tft/   */
+//#include <TFT_eSPI.h>
+
+// Install the "XPT2046_Touchscreen" library by Paul Stoffregen to use the Touchscreen - https://github.com/PaulStoffregen/XPT2046_Touchscreen
+// Note: this library doesn't require further configuration
+#include <XPT2046_Touchscreen.h>
+
+/*
+TFT_eSPI tft = TFT_eSPI();
+*/
+// Touchscreen pins
+#define XPT2046_IRQ 36   // T_IRQ
+#define XPT2046_MOSI 32  // T_DIN
+#define XPT2046_MISO 39  // T_OUT
+#define XPT2046_CLK 25   // T_CLK
+#define XPT2046_CS 33    // T_CS
+#define SPI_TOUCH_FREQUENCY 2500000
+
+SPIClass touchscreenSPI = SPIClass(VSPI);
+XPT2046_Touchscreen touchscreen(XPT2046_CS, XPT2046_IRQ);
+
+#define SCREEN_WIDTH 320
+#define SCREEN_HEIGHT 240
+#define FONT_SIZE 2
+
+// Touchscreen coordinates: (x, y) and pressure (z)
+int x, y, z;
+
+
+
 //===================================  Hardware Connections =============================
 #define TFT_CS             15                     // Display "CS" pin
 #define TFT_DC              2                     // Display "DC" pin
@@ -115,7 +150,7 @@ const word colors[] = {BLACK,BLUE,NAVY,RED,MAROON,GREEN,LIME,CYAN,TEAL,PURPLE,
 #define TFT_BACKLIGHT_ON HIGH // Level to turn ON back-light (HIGH or LOW)
 
 //Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC);
-Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC, TFT_MOSI,TFT_SCLK);
+Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC, TFT_MOSI, TFT_SCLK);
 
 //===================================  Rotary Encoder Variables =========================
 volatile int      rotaryCounter    = 0;           // "position" of rotary encoder (increments CW) 
@@ -132,7 +167,7 @@ volatile long     button_downtime  = 0L;          // ms the button was pushed be
                     
 char *words[]     = {"THE", "OF", "AND", "TO", "A", "IN", "THAT", "IS", "WAS", "HE", 
                      "FOR", "IT", "WITH", "AS", "HIS", "ON", "BE", "AT", "BY", "I", 
-                     "THIS", "HAD", "NOT", "ARE", "BUT", "FROM", "OR", "HAVE", "AN", "THEY", 
+                     "THIS", "HAD", "NOT", "ARE", "BUT", "FROM", "OR", "HAVE", "AN", " THEY", 
                      "WHICH", "ONE", "YOU", "WERE", "ALL", "HER", "SHE", "THERE", "WOULD", "THEIR", 
                      "WE", "HIM", "BEEN", "HAS", "WHEN", "WHO", "WILL", "NO", "MORE", "IF", 
                      "OUT", "SO", "UP", "SAID", "WHAT", "ITS", "ABOUT", "THAN", "INTO", "THEM", 
@@ -2069,6 +2104,21 @@ void splashScreen()                               // not splashy at all!
   tft.setTextSize(2);
 }
 
+void initTouchscreen()
+{
+  Serial.println("Init touchscreen");
+   // Start the SPI for the touchscreen and init the touchscreen
+  touchscreenSPI.begin(XPT2046_CLK, XPT2046_MISO, XPT2046_MOSI, XPT2046_CS);
+  touchscreen.begin(touchscreenSPI);
+  // Set the Touchscreen rotation in landscape mode
+  // Note: in some displays, the touchscreen might be upside down, so you might need to set the rotation to 3: touchscreen.setRotation(3);
+  touchscreen.setRotation(1);
+
+  //touchscreen.usingInterrupt(digitalPinToInterrupt(XPT2046_IRQ));
+  attachInterrupt(digitalPinToInterrupt(XPT2046_IRQ), touchInterrupt, FALLING);
+
+}
+
 
 void setup() 
 {
@@ -2078,16 +2128,69 @@ void setup()
   initSD();                                       // initialize SD library
   loadConfig();                                   // get saved values from EEPROM
   splashScreen();                                 // show we are ready
-  initEncoder();                                  // attach encoder interrupts
+ // initEncoder();                                  // attach encoder interrupts
+  initTouchscreen();
   initMorse();                                    // attach paddles & adjust speed
   delay(2000);                                    // keep splash screen on for a while
   clearScreen();
 }
 
+// Print Touchscreen info about X, Y and Pressure (Z) on the Serial Monitor
+void printTouchToSerial(int touchX, int touchY, int touchZ) {
+  Serial.print("X = ");
+  Serial.print(touchX);
+  Serial.print(" | Y = ");
+  Serial.print(touchY);
+  Serial.print(" |    delay(100); Pressure = ");
+  Serial.print(touchZ);
+  Serial.println();
+}
 
+// Print Touchscreen info about X, Y and Pressure (Z) on the TFT Display
+void printTouchToDisplay(int touchX, int touchY, int touchZ) {
+  // Clear TFT screen
+ // tft.fillScreen(TFT_WHITE);
+ // tft.setTextColor(TFT_BLACK, TFT_WHITE);
+
+  int centerX = SCREEN_WIDTH / 2;
+      delay(100);int textY = 80;
+ 
+  String tempText = "X = " + String(touchX);
+ // tft.drawCentreString(tempText, centerX, textY, FONT_SIZE);
+
+  textY += 20;
+  tempText = "Y = " + String(touchY);
+ // tft.drawCentreString(tempText, centerX, textY, FONT_SIZE);
+
+  textY += 20;
+  tempText = "Pressure = " + String(touchZ);
+ // tft.drawCentreString(tempText, centerX, textY, FONT_SIZE);
+}
+
+void touchInterrupt()
+{
+  button_pressed = true;
+}
+
+void readTouch() 
+{  //Serial.println("Loop");
+  //if (touchscreen.tirqTouched() && touchscreen.touched()) {
+    //Serial.println("Touch");
+    // Get Touchscreen points
+    TS_Point p = touchscreen.getPoint();
+    // Calibrate Touchscreen points with map function to the correct width and height
+    x = map(p.x, 200, 3700, 1, SCREEN_WIDTH);
+    y = map(p.y, 240, 3800, 1, SCREEN_HEIGHT);
+    z = p.z;
+
+    //printTouchToSerial(x, y, z);
+    //printTouchToDisplay(x, y, z);
+
+  //}
+}
 void loop()
 {
-  Serial.println("Loop");
+  readTouch();
   int selection = startItem;                      // start with user specified startup screen
   if (!inStartup || (startItem<0))                // but, if there isn't one,                 
     selection = getMenuSelection();               // get menu selection from user instead
